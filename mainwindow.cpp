@@ -1,4 +1,5 @@
 
+#include <QMutexLocker>
 #include <QtDebug>
 #include <QtGui>
 
@@ -9,48 +10,24 @@ extern "C" {
 #include <bluetooth.h>
 #include <brick.h>
 #include <error.h>
+#include <motor.h>
 
 #include "connectdialog.h"
 
 #include "mainwindow.h"
 
 
-
-#define DUR1   400
-#define DUR2   500
-#define PAUSE  150
-
-#define TONE_C 264
-#define TONE_D 297
-#define TONE_E 330
-#define TONE_F 352
-#define TONE_G 396
-#define TONE_A 440
-
 MainWindow::MainWindow()
     : m_wiiThread(this),
       m_connectedToWii(false),
-      m_nxtConnection(0)
+      m_nxtConnection(0),
+      m_topWidget(0)
 {
-    QWidget *widget = new QWidget;
-    setCentralWidget(widget);
-    /*
-    QWidget *topFiller = new QWidget;
-    topFiller->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-    QWidget *bottomFiller = new QWidget;
-    bottomFiller->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-    QVBoxLayout *layout = new QVBoxLayout;
-    layout->setMargin(5);
-    layout->addWidget(topFiller);
-    layout->addWidget(infoLabel);
-    layout->addWidget(bottomFiller);
-    widget->setLayout(layout);
-    */
     CreateActions();
     CreateMenus();
 
+    // TODO: Create common controls for motor mode etc.
+    
     setWindowTitle(tr("NXT Remote"));
     setMinimumSize(160, 160);
     resize(480, 320);
@@ -71,6 +48,14 @@ void MainWindow::ConnectToNxt()
     try
     {
         m_nxtConnection->connect(address.toAscii());
+
+        nxt::Brick brick(m_nxtConnection);
+        nxt::Device_info info;
+        brick.get_device_info(info);
+        qDebug() << "Connected to NXT named " << info.name.c_str();
+
+        // Play a sound to indicate successful connection
+        brick.play_tone(440, 200, true);
     }
     catch (const nxt::Nxt_exception& e)
     {
@@ -79,31 +64,16 @@ void MainWindow::ConnectToNxt()
                               tr("Unable to connect to NXT: %1").arg(e.what()));
         delete m_nxtConnection;
         m_nxtConnection = 0;
-		return;
+        return;
     }
     QApplication::restoreOverrideCursor();
 
     m_connectNxtAct->setEnabled(false);
     m_disconnectNxtAct->setEnabled(true);
-
-    nxt::Brick brick(m_nxtConnection);
-
-    nxt::Device_info info;
-    brick.get_device_info(info);
-    
-    qDebug() << "BDA:" << info.bt_address.c_str();
-    qDebug() << "Name:" << info.name.c_str();
-    
-    brick.play_tone(TONE_C, DUR1, true); // Al -
-    usleep((DUR1+PAUSE)*1000);
-    /*
-    playtone(m_nxt, TONE_D,DUR1); // le
-    playtone(m_nxt, TONE_E,DUR1); // mei -
-    playtone(m_nxt, TONE_F,DUR1); // ne
-    playtone(m_nxt, TONE_G,DUR2); // Ent -
-    playtone(m_nxt, TONE_G,DUR2); // chen
-    */
-
+/*
+    nxt::Motor m(nxt::OUT_A, m_nxtConnection);
+    m.on(50, 90, true);
+*/
 }
 
 
@@ -118,43 +88,59 @@ void MainWindow::ConnectToWiimote()
     qDebug() << "Address:" << address;
 
     memset(&(m_wiiThread.m_wiimoteInfo), sizeof(wiimote_t), 0);
+    m_wiiThread.m_wiimoteInfo.link.device = 1;
 
-	if (wiimote_connect(&m_wiiThread.m_wiimoteInfo, address.toAscii()) < 0)
+    if (wiimote_connect(&m_wiiThread.m_wiimoteInfo, address.toAscii()) < 0)
     {
         QMessageBox::critical(this, tr("Wiimote"),
                               tr("Unable to connect to Wiimote: %1").arg(wiimote_get_error()));
-		return;
-	}
+        return;
+    }
     m_connectedToWii = true;
     m_connectWiimoteAct->setEnabled(false);
     m_disconnectWiimoteAct->setEnabled(true);
 
     m_wiiThread.start();
+
+    ShowWiimoteControls();
 }
 
 
 void MainWindow::DisconnectNxt()
 {
     if (m_nxtConnection)
-    {
         m_nxtConnection->disconnect();
-        delete m_nxtConnection;
-        m_nxtConnection = 0;
-    }
+    delete m_nxtConnection;
+    m_nxtConnection = 0;
     m_connectNxtAct->setEnabled(true);
     m_disconnectNxtAct->setEnabled(false);
+    HideControls();
 }
 
 
 void MainWindow::DisconnectWiimote()
 {
     if (m_connectedToWii)
-    {
         wiimote_disconnect(&m_wiiThread.m_wiimoteInfo);
-        m_connectedToWii = false;
-    }
+    m_connectedToWii = false;
     m_disconnectWiimoteAct->setEnabled(false);
     m_connectWiimoteAct->setEnabled(true);
+    if (m_nxtConnection)
+        ShowMouseControls();
+    else
+        HideControls();
+}
+
+
+void MainWindow::NunchukClicked()
+{
+    m_wiiThread.SetMode(WiiThread::Nunchuk);
+}
+
+
+void MainWindow::TiltClicked()
+{
+    m_wiiThread.SetMode(WiiThread::Tilt);
 }
 
 
@@ -200,10 +186,72 @@ void MainWindow::CreateMenus()
 }
 
 
+void MainWindow::HideControls()
+{
+    m_wiiThread.SetInfoLabel(0);
+    delete m_topWidget;
+    m_topWidget = 0;
+}
+
+
+void MainWindow::ShowWiimoteControls()
+{
+    HideControls();
+
+    QLabel* label = new QLabel(this);
+    m_wiiThread.SetInfoLabel(label);
+    
+    QGroupBox* bGroup = new QGroupBox(tr("Control"), this);
+    QVBoxLayout* controlVBox = new QVBoxLayout;
+    QRadioButton* nunchukButton = new QRadioButton(tr("&Nunchuk"));
+    QRadioButton* tiltButton = new QRadioButton(tr("&Tilt"));
+    nunchukButton->setChecked(true);
+    controlVBox->addWidget(nunchukButton);
+    controlVBox->addWidget(tiltButton);
+    controlVBox->addStretch(1);
+    bGroup->setLayout(controlVBox);
+
+    QVBoxLayout* vbox = new QVBoxLayout;
+    vbox->addWidget(bGroup);
+    vbox->addWidget(label);
+
+    m_topWidget = new QWidget;
+    m_topWidget->setLayout(vbox);
+    setCentralWidget(m_topWidget);
+
+    connect(nunchukButton, SIGNAL(clicked()), this, SLOT(NunchukClicked()));
+    connect(tiltButton, SIGNAL(clicked()), this, SLOT(TiltClicked()));
+    // Set default
+    NunchukClicked();
+}
+
+
+void MainWindow::ShowMouseControls()
+{
+}
+
+
+// ----------------------------------------------------------------
+
 
 MainWindow::WiiThread::WiiThread(MainWindow* parent)
-    : m_parent(parent)
+    : m_parent(parent),
+      m_mode(Nunchuk),
+      m_infoLabel(0)
 {
+}
+
+
+void MainWindow::WiiThread::SetMode(Mode mode)
+{
+    m_mode = mode;
+}
+
+
+void MainWindow::WiiThread::SetInfoLabel(QLabel* label)
+{
+    QMutexLocker lock(&m_mutex);
+    m_infoLabel = label;
 }
 
 
@@ -211,22 +259,51 @@ void MainWindow::WiiThread::run()
 {
     m_wiimoteInfo.led.bits = 1;
     // Enable IR-sensor and accelerometer
-    m_wiimoteInfo.mode.bits = WIIMOTE_MODE_ACC_IR_EXT;
+//    m_wiimoteInfo.mode.ir = 1;
+//    m_wiimoteInfo.mode.acc = 1;
     m_wiimoteInfo.rumble = 0;
 
-	while (wiimote_is_open(&m_wiimoteInfo))
+    while (wiimote_is_open(&m_wiimoteInfo))
     {
-		if (wiimote_update(&m_wiimoteInfo) < 0)
+        if (wiimote_update(&m_wiimoteInfo) < 0)
         {
             QMessageBox::critical(m_parent, tr("Wiimote"),
                                   tr("Lost connection to Wiimote: %1").arg(wiimote_get_error()));
             m_parent->DisconnectWiimote();
-			break;
-		}
+            break;
+        }
 
-		qDebug() << "MODE" << m_wiimoteInfo.mode.bits;
+        int x = 0;
+        int y = 0;
+        switch (m_mode)
+        {
+        case Nunchuk:
+            // Value in neutral is around 128, extremes are approx. 32 and 224
+            // Subtracting 128 scales these values nicely to around +- 100.
+            // We add a dead zone of +- 8.
+            x = m_wiimoteInfo.ext.nunchuk.joyx - 128;
+            if (abs(x) < 8)
+                x = 0;
+              y = m_wiimoteInfo.ext.nunchuk.joyy - 128;
+            if (abs(y) < 8)
+                y = 0;
+            {
+                QMutexLocker lock(&m_mutex);
+                if (m_infoLabel)
+                {
+                    m_infoLabel->setText(QString("X: %1\nY: %2").arg(x).arg(y));
+                }
+            }
+            break;
 
-		qDebug() << "KEYS"
+        case Tilt:
+            // TODO
+            break;
+        }
+        
+        qDebug() << "MODE" << m_wiimoteInfo.mode.bits;
+
+        qDebug() << "KEYS"
                  << m_wiimoteInfo.keys.one
                  << m_wiimoteInfo.keys.two
                  << m_wiimoteInfo.keys.a
@@ -238,27 +315,19 @@ void MainWindow::WiiThread::run()
                  << m_wiimoteInfo.keys.home
                  << m_wiimoteInfo.keys.plus
                  << m_wiimoteInfo.keys.minus;
-			
-// 		qDebug() << "JOY1"
-//                  << m_wiimoteInfo.ext.nunchuk.joyx
-//                  << m_wiimoteInfo.ext.nunchuk.joyy
-//                  << m_wiimoteInfo.ext.nunchuk.axis.x
-//                  << m_wiimoteInfo.ext.nunchuk.axis.y
-//                  << m_wiimoteInfo.ext.nunchuk.axis.z
-//                  << m_wiimoteInfo.ext.nunchuk.keys.z
-//                  << m_wiimoteInfo.ext.nunchuk.keys.c;
+            
 
-		qDebug() << "AXIS"
+        qDebug() << "AXIS"
                  << m_wiimoteInfo.axis.x
                  << m_wiimoteInfo.axis.y
                  << m_wiimoteInfo.axis.z;
 
-		qDebug() << "TILT"
+        qDebug() << "TILT"
                  << m_wiimoteInfo.tilt.x
                  << m_wiimoteInfo.tilt.y
                  << m_wiimoteInfo.tilt.z;
 
-		qDebug() << "FORCE"
+        qDebug() << "FORCE"
                  << m_wiimoteInfo.force.x
                  << m_wiimoteInfo.force.y
                  << m_wiimoteInfo.force.z
@@ -266,25 +335,25 @@ void MainWindow::WiiThread::run()
                          m_wiimoteInfo.force.y*m_wiimoteInfo.force.y+
                          m_wiimoteInfo.force.z*m_wiimoteInfo.force.z);
 
-// 		qDebug() << "IR1"
+//      qDebug() << "IR1"
 //                  << m_wiimoteInfo.ir1.x
 //                  << m_wiimoteInfo.ir1.y
 //                  << m_wiimoteInfo.ir1.size;
 
-// 		qDebug() << "IR2"
+//      qDebug() << "IR2"
 //                  << m_wiimoteInfo.ir2.x
 //                  << m_wiimoteInfo.ir2.y
 //                  << m_wiimoteInfo.ir2.size;
 
-// 		qDebug() << "IR3"
+//      qDebug() << "IR3"
 //                  << m_wiimoteInfo.ir3.x
 //                  << m_wiimoteInfo.ir3.y
 //                  << m_wiimoteInfo.ir3.size;
-			
-// 		qDebug() << "IR4"
+            
+//      qDebug() << "IR4"
 //                  << m_wiimoteInfo.ir4.x
 //                  << m_wiimoteInfo.ir4.y
 //                  << m_wiimoteInfo.ir4.size;
 
-	}
+    }
 }

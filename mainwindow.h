@@ -3,6 +3,7 @@
 #define mainwindow_h
 
 #include <QMainWindow>
+#include <QMutex>
 #include <QThread>
 
 extern "C"
@@ -35,23 +36,42 @@ private slots:
     void ConnectToWiimote();
     void DisconnectNxt();
     void DisconnectWiimote();
+    void NunchukClicked();
+    void TiltClicked();
     void About();
 
 private:
     class WiiThread : public QThread
     {
     public:
+        enum Mode
+        {
+            Nunchuk,
+            Tilt
+        };
+        
         WiiThread(MainWindow* parent);
+
+        void SetMode(Mode mode);
+
+        void SetInfoLabel(QLabel* label);
         
         wiimote_t m_wiimoteInfo;
-    private:
-        MainWindow* m_parent;
         
+    private:
         virtual void run();
+
+        MainWindow* m_parent;
+        Mode m_mode;
+        QLabel* m_infoLabel;
+        QMutex m_mutex;
     };
     
     void CreateActions();
     void CreateMenus();
+    void HideControls();
+    void ShowWiimoteControls();
+    void ShowMouseControls();
 
     QMenu* m_deviceMenu;
     QMenu* m_helpMenu;
@@ -63,6 +83,7 @@ private:
     WiiThread m_wiiThread;
     bool m_connectedToWii;
     nxt::Bluetooth* m_nxtConnection;
+    QWidget* m_topWidget;
 };
 
 #endif

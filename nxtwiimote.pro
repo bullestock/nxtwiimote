@@ -5,9 +5,8 @@
 TEMPLATE = app
 TARGET = 
 DEPENDPATH += .
-#INCLUDEPATH += . ../libwiimote/libwiimote-ant/src/
-INCLUDEPATH += . ../norgesgade/include
-LIBS += -lcwiimote -L ../norgesgade/src -lnxtbt
+INCLUDEPATH += . libnxtbt/include
+LIBS += -lcwiimote -L libnxtbt/src -lnxtbt
 
 # Input
 HEADERS += mainwindow.h connectdialog.h
