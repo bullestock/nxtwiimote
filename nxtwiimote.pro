@@ -9,6 +9,6 @@ INCLUDEPATH += . libnxtbt/include
 LIBS += -lcwiimote -L libnxtbt/src -lnxtbt
 
 # Input
-HEADERS += mainwindow.h connectdialog.h
+HEADERS += mainwindow.h connectdialog.h setupdialog.h
 SOURCES += main.cpp mainwindow.cpp connectdialog.cpp
-FORMS   += connectdialog.ui
+FORMS   += connectdialog.ui setupdialog.ui

@@ -6,11 +6,17 @@
 #include <QMutex>
 #include <QThread>
 
+// libwiimote
 extern "C"
 {
 #include <libcwiimote/wiimote.h>
 }
 
+// libnxtbt
+#include <motor.h>
+#include <sensor.h>
+
+// Forward declarations
 namespace nxt
 {
     class Bluetooth;
@@ -19,11 +25,13 @@ namespace nxt
 QT_BEGIN_NAMESPACE
 class QAction;
 class QActionGroup;
+class QComboBox;
 class QLabel;
 class QMenu;
 QT_END_NAMESPACE
 
 
+// Main window
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -36,6 +44,7 @@ private slots:
     void ConnectToWiimote();
     void DisconnectNxt();
     void DisconnectWiimote();
+    void ShowSetupDialog();
     void NunchukClicked();
     void TiltClicked();
     void About();
@@ -66,24 +75,43 @@ private:
         QLabel* m_infoLabel;
         QMutex m_mutex;
     };
+
+    static const int NOF_SENSOR_PORTS = 4;
+    static const int NOF_MOTOR_PORTS = 3;
     
+    struct PortSetup
+    {
+        PortSetup();
+        
+        nxt::Sensor_type sensors[NOF_SENSOR_PORTS];
+        nxt::Motor_port  motors[NOF_MOTOR_PORTS];
+        bool             reverse[NOF_MOTOR_PORTS];
+        bool             coast[NOF_MOTOR_PORTS];
+    };
+        
     void CreateActions();
     void CreateMenus();
     void HideControls();
     void ShowWiimoteControls();
     void ShowMouseControls();
-
+    void SetSensorCombo(nxt::Sensor_type type, QComboBox* cb);
+    void SetMotorCombo(nxt::Motor_port port, QComboBox* cb);
+    static QString GetAsString(nxt::Sensor_type type);
+    
     QMenu* m_deviceMenu;
+    QMenu* m_setupMenu;
     QMenu* m_helpMenu;
     QAction* m_connectNxtAct;
     QAction* m_connectWiimoteAct;
     QAction* m_disconnectNxtAct;
     QAction* m_disconnectWiimoteAct;
+    QAction* m_setupAct;
     QAction* m_aboutAct;
     WiiThread m_wiiThread;
     bool m_connectedToWii;
     nxt::Bluetooth* m_nxtConnection;
     QWidget* m_topWidget;
+    PortSetup m_portSetup;
 };
 
 #endif

@@ -10,9 +10,9 @@ extern "C" {
 #include <bluetooth.h>
 #include <brick.h>
 #include <error.h>
-#include <motor.h>
 
 #include "connectdialog.h"
+#include "ui_setupdialog.h"
 
 #include "mainwindow.h"
 
@@ -132,6 +132,39 @@ void MainWindow::DisconnectWiimote()
 }
 
 
+void MainWindow::ShowSetupDialog()
+{
+    QDialog dlg(this);
+    Ui::SetupDialog setupDlg;
+    setupDlg.setupUi(&dlg);
+    // Center checkboxes
+    for (int i = 0; i < 4; ++i)
+    {
+        setupDlg.gridLayout->itemAtPosition(i, 1)->setAlignment(Qt::AlignHCenter);
+        setupDlg.gridLayout->itemAtPosition(i, 2)->setAlignment(Qt::AlignHCenter);
+    }
+    SetSensorCombo(m_portSetup.sensors[0], setupDlg.m_sensorCombo1);
+    SetSensorCombo(m_portSetup.sensors[1], setupDlg.m_sensorCombo2);
+    SetSensorCombo(m_portSetup.sensors[2], setupDlg.m_sensorCombo3);
+    SetSensorCombo(m_portSetup.sensors[3], setupDlg.m_sensorCombo4);
+    setupDlg.m_motor1RevCheck->setChecked(m_portSetup.reverse[0]);
+    setupDlg.m_motor1CoastCheck->setChecked(m_portSetup.coast[0]);
+    setupDlg.m_motor2RevCheck->setChecked(m_portSetup.reverse[1]);
+    setupDlg.m_motor2CoastCheck->setChecked(m_portSetup.coast[1]);
+    setupDlg.m_motor3RevCheck->setChecked(m_portSetup.reverse[2]);
+    setupDlg.m_motor3CoastCheck->setChecked(m_portSetup.coast[2]);
+    
+/*
+  SetMotorCombo(m_portSetup.motors[0], setupDlg.m_motorCombo1);
+    SetMotorCombo(m_portSetup.motors[1], setupDlg.m_motorCombo2);
+    SetMotorCombo(m_portSetup.motors[2], setupDlg.m_motorCombo3);
+*/
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    int motor1 = setupDlg.m_motorCombo1->currentIndex();
+}
+
+
 void MainWindow::NunchukClicked()
 {
     m_wiiThread.SetMode(WiiThread::Nunchuk);
@@ -168,6 +201,9 @@ void MainWindow::CreateActions()
     m_disconnectWiimoteAct->setEnabled(false);
     connect(m_disconnectWiimoteAct, SIGNAL(triggered()), this, SLOT(DisconnectWiimote()));
 
+    m_setupAct = new QAction(tr("&Ports"), this);
+    connect(m_setupAct, SIGNAL(triggered()), this, SLOT(ShowSetupDialog()));
+    
     m_aboutAct = new QAction(tr("&About"), this);
     m_aboutAct->setStatusTip(tr("Show the application's About box"));
     connect(m_aboutAct, SIGNAL(triggered()), this, SLOT(About()));
@@ -181,6 +217,9 @@ void MainWindow::CreateMenus()
     m_deviceMenu->addAction(m_disconnectNxtAct);
     m_deviceMenu->addAction(m_disconnectWiimoteAct);
 
+    m_setupMenu = menuBar()->addMenu(tr("&Setup"));
+    m_setupMenu->addAction(m_setupAct);
+    
     m_helpMenu = menuBar()->addMenu(tr("&Help"));
     m_helpMenu->addAction(m_aboutAct);
 }
@@ -204,7 +243,7 @@ void MainWindow::ShowWiimoteControls()
     QGroupBox* bGroup = new QGroupBox(tr("Control"), this);
     QVBoxLayout* controlVBox = new QVBoxLayout;
     QRadioButton* nunchukButton = new QRadioButton(tr("&Nunchuk"));
-    QRadioButton* tiltButton = new QRadioButton(tr("&Tilt"));
+    QRadioButton* tiltButton = new QRadioButton(tr("&Tilt (not implemented yet)"));
     nunchukButton->setChecked(true);
     controlVBox->addWidget(nunchukButton);
     controlVBox->addWidget(tiltButton);
@@ -228,6 +267,66 @@ void MainWindow::ShowWiimoteControls()
 
 void MainWindow::ShowMouseControls()
 {
+}
+
+
+void MainWindow::SetSensorCombo(nxt::Sensor_type type, QComboBox* cb)
+{
+    cb->clear();
+    for (int i = nxt::NO_SENSOR; i <= nxt::SONAR_INCH; ++i)
+    {
+        if ((i == nxt::CUSTOM) ||
+            (i == nxt::LOWSPEED) ||
+            (i == nxt::LOWSPEED_9V))
+            continue;
+        cb->addItem(GetAsString(static_cast<nxt::Sensor_type>(i)), i);
+    }
+    cb->setCurrentIndex(cb->findData(type));
+}
+
+
+// static
+QString MainWindow::GetAsString(nxt::Sensor_type type)
+{
+    switch (type)
+    {
+    case nxt::NO_SENSOR:
+        return "No sensor";
+
+    case nxt::TOUCH:
+        return "Touch sensor (NXT or RCX)";
+
+    case nxt::TEMPERATURE:
+        return "RCX temperature sensor";
+
+    case nxt::REFLECTION:
+        return "RCX light sensor";
+
+    case nxt::ANGLE:
+        return "RCX rotation sensor";
+
+    case nxt::LIGHT_ACTIVE:
+        return "NXT light sensor, LED on";
+
+    case nxt::LIGHT_INACTIVE:
+        return "NXT light sensor, LED off";
+
+    case nxt::SOUND_DB:
+        return "NXT sound sensor, dB";
+
+    case nxt::SOUND_DBA:
+        return "NXT sound sensor, dBA";
+
+    case nxt::SONAR_METRIC:
+        return "Sonar sensor, metric";
+
+    case nxt::SONAR_INCH:
+        return "Sonar sensor, inches";
+
+    default:
+        break;
+    }
+    return "?";
 }
 
 
@@ -258,9 +357,6 @@ void MainWindow::WiiThread::SetInfoLabel(QLabel* label)
 void MainWindow::WiiThread::run()
 {
     m_wiimoteInfo.led.bits = 1;
-    // Enable IR-sensor and accelerometer
-//    m_wiimoteInfo.mode.ir = 1;
-//    m_wiimoteInfo.mode.acc = 1;
     m_wiimoteInfo.rumble = 0;
 
     while (wiimote_is_open(&m_wiimoteInfo))
@@ -272,6 +368,10 @@ void MainWindow::WiiThread::run()
             m_parent->DisconnectWiimote();
             break;
         }
+
+        // Enable IR-sensor and accelerometer
+        m_wiimoteInfo.mode.ir = 1;
+        m_wiimoteInfo.mode.acc = 1;
 
         int x = 0;
         int y = 0;
@@ -355,5 +455,25 @@ void MainWindow::WiiThread::run()
 //                  << m_wiimoteInfo.ir4.y
 //                  << m_wiimoteInfo.ir4.size;
 
+    }
+}
+
+
+// ----------------------------------------------------------------
+
+
+MainWindow::PortSetup::PortSetup()
+{
+    sensors[0] = nxt::TOUCH;
+    sensors[1] = nxt::SOUND_DB;
+    sensors[2] = nxt::LIGHT_ACTIVE;
+    sensors[3] = nxt::SONAR_METRIC;
+    motors[0] = nxt::OUT_B;
+    motors[1] = nxt::OUT_C;
+    motors[2] = nxt::OUT_A;
+    for (int i = 0; i < NOF_MOTOR_PORTS; ++i)
+    {
+        reverse[i] = false;
+        coast[i] = false;
     }
 }
