@@ -37,13 +37,13 @@ namespace nxt
        * @return the error code
        * @see Nxt_errors
        */
-      unsigned int error_code();
+      unsigned int error_code() const;
 
       /**
        * Who threw the exception
        * @return a std::string that tells the class and the function that threw the exception (used for debug)
        */
-      const std::string who();
+      const std::string who() const;
     protected:
       std::string function_name;
       std::string class_name;

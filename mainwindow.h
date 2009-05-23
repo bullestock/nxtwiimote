@@ -1,6 +1,25 @@
+// Copyright 2009 Torsten Martinsen <torsten@bullestock.net>
+
+// This file is part of nxtwiimote.
+
+// Nxtwiimote is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// Nxtwiimote is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with nxtwiimote.  If not, see <http://www.gnu.org/licenses/>.
+
 
 #ifndef mainwindow_h
 #define mainwindow_h
+
+#include <boost/shared_ptr.hpp>
 
 #include <QMainWindow>
 #include <QMutex>
@@ -11,10 +30,6 @@ extern "C"
 {
 #include <libcwiimote/wiimote.h>
 }
-
-// libnxtbt
-#include <motor.h>
-#include <sensor.h>
 
 // Forward declarations
 namespace nxt
@@ -30,6 +45,8 @@ class QLabel;
 class QMenu;
 QT_END_NAMESPACE
 
+class PortSetup;
+
 
 // Main window
 class MainWindow : public QMainWindow
@@ -38,6 +55,13 @@ class MainWindow : public QMainWindow
 
 public:
     MainWindow();
+
+    PortSetup GetSetup() const;
+
+    boost::shared_ptr<nxt::Bluetooth> GetNxtConnection();
+
+public slots:
+    void Quit();
 
 private slots:
     void ConnectToNxt();
@@ -76,27 +100,11 @@ private:
         QMutex m_mutex;
     };
 
-    static const int NOF_SENSOR_PORTS = 4;
-    static const int NOF_MOTOR_PORTS = 3;
-    
-    struct PortSetup
-    {
-        PortSetup();
-        
-        nxt::Sensor_type sensors[NOF_SENSOR_PORTS];
-        nxt::Motor_port  motors[NOF_MOTOR_PORTS];
-        bool             reverse[NOF_MOTOR_PORTS];
-        bool             coast[NOF_MOTOR_PORTS];
-    };
-        
     void CreateActions();
     void CreateMenus();
     void HideControls();
     void ShowWiimoteControls();
     void ShowMouseControls();
-    void SetSensorCombo(nxt::Sensor_type type, QComboBox* cb);
-    void SetMotorCombo(nxt::Motor_port port, QComboBox* cb);
-    static QString GetAsString(nxt::Sensor_type type);
     
     QMenu* m_deviceMenu;
     QMenu* m_setupMenu;
@@ -109,9 +117,11 @@ private:
     QAction* m_aboutAct;
     WiiThread m_wiiThread;
     bool m_connectedToWii;
-    nxt::Bluetooth* m_nxtConnection;
+    boost::shared_ptr<nxt::Bluetooth> m_nxtConnection;
+    QMutex m_nxtConnectionMutex;
     QWidget* m_topWidget;
-    PortSetup m_portSetup;
+    PortSetup* m_portSetup;
+    mutable QMutex m_portSetupMutex;
 };
 
 #endif

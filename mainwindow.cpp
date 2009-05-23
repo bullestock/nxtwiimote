@@ -1,5 +1,24 @@
+// Copyright 2009 Torsten Martinsen <torsten@bullestock.net>
+
+// This file is part of nxtwiimote.
+
+// Nxtwiimote is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// Nxtwiimote is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with nxtwiimote.  If not, see <http://www.gnu.org/licenses/>.
+
+#include <sstream>
 
 #include <QMutexLocker>
+#include <QSettings>
 #include <QtDebug>
 #include <QtGui>
 
@@ -12,17 +31,24 @@ extern "C" {
 #include <error.h>
 
 #include "connectdialog.h"
-#include "ui_setupdialog.h"
+#include "portsetup.h"
+#include "setupdialog.h"
 
 #include "mainwindow.h"
+
+
+using namespace std;
 
 
 MainWindow::MainWindow()
     : m_wiiThread(this),
       m_connectedToWii(false),
-      m_nxtConnection(0),
-      m_topWidget(0)
+      m_topWidget(0),
+      m_portSetup(new PortSetup)
 {
+    QSettings settings;
+    m_portSetup->Load(settings);
+
     CreateActions();
     CreateMenus();
 
@@ -31,6 +57,27 @@ MainWindow::MainWindow()
     setWindowTitle(tr("NXT Remote"));
     setMinimumSize(160, 160);
     resize(480, 320);
+}
+
+
+PortSetup MainWindow::GetSetup() const
+{
+    QMutexLocker lock(&m_portSetupMutex);
+    return *m_portSetup;
+}
+
+
+boost::shared_ptr<nxt::Bluetooth> MainWindow::GetNxtConnection()
+{
+    QMutexLocker lock(&m_nxtConnectionMutex);
+    return m_nxtConnection;
+}
+
+
+void MainWindow::Quit()
+{
+    m_wiiThread.terminate();
+    m_wiiThread.wait();
 }
 
 
@@ -43,13 +90,13 @@ void MainWindow::ConnectToNxt()
     qDebug() << "Selected device:" << device;
     QString address = device.section('(', 1).left(17);
 
-    m_nxtConnection = new nxt::Bluetooth;
+    m_nxtConnection.reset(new nxt::Bluetooth);
     QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
     try
     {
         m_nxtConnection->connect(address.toAscii());
 
-        nxt::Brick brick(m_nxtConnection);
+        nxt::Brick brick(m_nxtConnection.get());
         nxt::Device_info info;
         brick.get_device_info(info);
         qDebug() << "Connected to NXT named " << info.name.c_str();
@@ -62,18 +109,13 @@ void MainWindow::ConnectToNxt()
         QApplication::restoreOverrideCursor();
         QMessageBox::critical(this, tr("NXT"),
                               tr("Unable to connect to NXT: %1").arg(e.what()));
-        delete m_nxtConnection;
-        m_nxtConnection = 0;
+        m_nxtConnection.reset();
         return;
     }
     QApplication::restoreOverrideCursor();
 
     m_connectNxtAct->setEnabled(false);
     m_disconnectNxtAct->setEnabled(true);
-/*
-    nxt::Motor m(nxt::OUT_A, m_nxtConnection);
-    m.on(50, 90, true);
-*/
 }
 
 
@@ -110,8 +152,7 @@ void MainWindow::DisconnectNxt()
 {
     if (m_nxtConnection)
         m_nxtConnection->disconnect();
-    delete m_nxtConnection;
-    m_nxtConnection = 0;
+    m_nxtConnection.reset();
     m_connectNxtAct->setEnabled(true);
     m_disconnectNxtAct->setEnabled(false);
     HideControls();
@@ -134,34 +175,22 @@ void MainWindow::DisconnectWiimote()
 
 void MainWindow::ShowSetupDialog()
 {
-    QDialog dlg(this);
-    Ui::SetupDialog setupDlg;
-    setupDlg.setupUi(&dlg);
-    // Center checkboxes
-    for (int i = 0; i < 4; ++i)
-    {
-        setupDlg.gridLayout->itemAtPosition(i, 1)->setAlignment(Qt::AlignHCenter);
-        setupDlg.gridLayout->itemAtPosition(i, 2)->setAlignment(Qt::AlignHCenter);
-    }
-    SetSensorCombo(m_portSetup.sensors[0], setupDlg.m_sensorCombo1);
-    SetSensorCombo(m_portSetup.sensors[1], setupDlg.m_sensorCombo2);
-    SetSensorCombo(m_portSetup.sensors[2], setupDlg.m_sensorCombo3);
-    SetSensorCombo(m_portSetup.sensors[3], setupDlg.m_sensorCombo4);
-    setupDlg.m_motor1RevCheck->setChecked(m_portSetup.reverse[0]);
-    setupDlg.m_motor1CoastCheck->setChecked(m_portSetup.coast[0]);
-    setupDlg.m_motor2RevCheck->setChecked(m_portSetup.reverse[1]);
-    setupDlg.m_motor2CoastCheck->setChecked(m_portSetup.coast[1]);
-    setupDlg.m_motor3RevCheck->setChecked(m_portSetup.reverse[2]);
-    setupDlg.m_motor3CoastCheck->setChecked(m_portSetup.coast[2]);
+    QMutexLocker lock(&m_portSetupMutex);
+    PortSetup ps(*m_portSetup);
+    lock.unlock();
     
-/*
-  SetMotorCombo(m_portSetup.motors[0], setupDlg.m_motorCombo1);
-    SetMotorCombo(m_portSetup.motors[1], setupDlg.m_motorCombo2);
-    SetMotorCombo(m_portSetup.motors[2], setupDlg.m_motorCombo3);
-*/
+    SetupDialog dlg(this, &ps);
+
     if (dlg.exec() != QDialog::Accepted)
         return;
-    int motor1 = setupDlg.m_motorCombo1->currentIndex();
+
+    QSettings settings;
+    ps.Save(settings);
+    ostringstream s;
+    s << ps;
+    qDebug() << "New setup:" << s.str().c_str();
+    lock.relock();
+    *m_portSetup = ps;
 }
 
 
@@ -270,64 +299,6 @@ void MainWindow::ShowMouseControls()
 }
 
 
-void MainWindow::SetSensorCombo(nxt::Sensor_type type, QComboBox* cb)
-{
-    cb->clear();
-    for (int i = nxt::NO_SENSOR; i <= nxt::SONAR_INCH; ++i)
-    {
-        if ((i == nxt::CUSTOM) ||
-            (i == nxt::LOWSPEED) ||
-            (i == nxt::LOWSPEED_9V))
-            continue;
-        cb->addItem(GetAsString(static_cast<nxt::Sensor_type>(i)), i);
-    }
-    cb->setCurrentIndex(cb->findData(type));
-}
-
-
-// static
-QString MainWindow::GetAsString(nxt::Sensor_type type)
-{
-    switch (type)
-    {
-    case nxt::NO_SENSOR:
-        return "No sensor";
-
-    case nxt::TOUCH:
-        return "Touch sensor (NXT or RCX)";
-
-    case nxt::TEMPERATURE:
-        return "RCX temperature sensor";
-
-    case nxt::REFLECTION:
-        return "RCX light sensor";
-
-    case nxt::ANGLE:
-        return "RCX rotation sensor";
-
-    case nxt::LIGHT_ACTIVE:
-        return "NXT light sensor, LED on";
-
-    case nxt::LIGHT_INACTIVE:
-        return "NXT light sensor, LED off";
-
-    case nxt::SOUND_DB:
-        return "NXT sound sensor, dB";
-
-    case nxt::SOUND_DBA:
-        return "NXT sound sensor, dBA";
-
-    case nxt::SONAR_METRIC:
-        return "Sonar sensor, metric";
-
-    case nxt::SONAR_INCH:
-        return "Sonar sensor, inches";
-
-    default:
-        break;
-    }
-    return "?";
-}
 
 
 // ----------------------------------------------------------------
@@ -361,6 +332,8 @@ void MainWindow::WiiThread::run()
 
     while (wiimote_is_open(&m_wiimoteInfo))
     {
+        QTime w;
+        w.start();
         if (wiimote_update(&m_wiimoteInfo) < 0)
         {
             QMessageBox::critical(m_parent, tr("Wiimote"),
@@ -368,7 +341,8 @@ void MainWindow::WiiThread::run()
             m_parent->DisconnectWiimote();
             break;
         }
-
+        int wms = w.elapsed();
+        
         // Enable IR-sensor and accelerometer
         m_wiimoteInfo.mode.ir = 1;
         m_wiimoteInfo.mode.acc = 1;
@@ -400,7 +374,56 @@ void MainWindow::WiiThread::run()
             // TODO
             break;
         }
+
+        int motor1 = 0;
+        int motor2 = 0;
         
+        PortSetup ps = m_parent->GetSetup();
+        if (ps.single)
+        {
+            motor1 = y;
+            motor2 = x;
+        }
+        else
+        {
+            motor1 = max(-100, min(100, y + x));
+            motor2 = max(-100, min(100, y - x));
+        }
+
+        if (ps.driveReverse)
+            motor2 *= -1;
+        
+        int motors[3] = { 0, 0, 0 };
+        motors[ps.motor1 - nxt::OUT_A] = motor1;
+        motors[ps.motor2 - nxt::OUT_A] = motor2;
+        motors[ps.actionMotor - nxt::OUT_A] = 0;
+
+        //qDebug() << "M:" << motors[0] << motors[1] << motors[2];
+
+        QTime n;
+        n.start();
+        boost::shared_ptr<nxt::Bluetooth> nxtConnection = m_parent->GetNxtConnection();
+        if (nxtConnection)
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                nxt::Motor m(static_cast<nxt::Motor_port>(nxt::OUT_A+i),
+                             nxtConnection.get());
+                try
+                {
+                    m.on(motors[i], 0, false);
+                }
+                catch (const nxt::Nxt_exception& e)
+                {
+                    qDebug() << "Motor" << i << "exception: P" << motors[i] << e.what() << e.who().c_str();
+                }
+            }
+        }
+        int nms = n.elapsed();
+
+        qDebug() << "Wii" << wms << "NXT" << nms;
+        
+        /*
         qDebug() << "MODE" << m_wiimoteInfo.mode.bits;
 
         qDebug() << "KEYS"
@@ -434,7 +457,7 @@ void MainWindow::WiiThread::run()
                  << sqrt(m_wiimoteInfo.force.x*m_wiimoteInfo.force.x+
                          m_wiimoteInfo.force.y*m_wiimoteInfo.force.y+
                          m_wiimoteInfo.force.z*m_wiimoteInfo.force.z);
-
+        */
 //      qDebug() << "IR1"
 //                  << m_wiimoteInfo.ir1.x
 //                  << m_wiimoteInfo.ir1.y
@@ -455,25 +478,5 @@ void MainWindow::WiiThread::run()
 //                  << m_wiimoteInfo.ir4.y
 //                  << m_wiimoteInfo.ir4.size;
 
-    }
-}
-
-
-// ----------------------------------------------------------------
-
-
-MainWindow::PortSetup::PortSetup()
-{
-    sensors[0] = nxt::TOUCH;
-    sensors[1] = nxt::SOUND_DB;
-    sensors[2] = nxt::LIGHT_ACTIVE;
-    sensors[3] = nxt::SONAR_METRIC;
-    motors[0] = nxt::OUT_B;
-    motors[1] = nxt::OUT_C;
-    motors[2] = nxt::OUT_A;
-    for (int i = 0; i < NOF_MOTOR_PORTS; ++i)
-    {
-        reverse[i] = false;
-        coast[i] = false;
     }
 }

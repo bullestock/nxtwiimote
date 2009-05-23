@@ -109,9 +109,9 @@ namespace nxt
       unsigned char *byte;
 
           /**
-          * nunmber of bytes recieved/send
+          * number of bytes received/sent
           */
-      int number_bytes;
+      unsigned number_bytes;
 
 
       int devcount;

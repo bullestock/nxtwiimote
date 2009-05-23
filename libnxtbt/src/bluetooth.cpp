@@ -140,9 +140,7 @@ bool dodebug = true;
 
 void Bluetooth::connect(const char *btaddr)
 {
-  int rv;
   struct sockaddr_rc addr = { 0 };
-  int s, status;
   char dest[18];
 
   memcpy(&dest, btaddr, 18);
@@ -154,7 +152,7 @@ void Bluetooth::connect(const char *btaddr)
   addr.rc_channel = (uint8_t) 1;
   str2ba( dest, &addr.rc_bdaddr );
 
-  status = ::connect(nxtsock, (struct sockaddr *)&addr, sizeof(addr));
+  int status = ::connect(nxtsock, (struct sockaddr *)&addr, sizeof(addr));
   if( status == 0 ) {
     if (dodebug) printf("rfcomm connection to %s good.\n", dest);
   }
@@ -164,7 +162,7 @@ void Bluetooth::connect(const char *btaddr)
   }
 
   //rv = fcntl(nxtsock, F_SETFD, FD_CLOEXEC);
-  rv = fcntl(nxtsock, F_SETFL, O_NONBLOCK);
+  int rv = fcntl(nxtsock, F_SETFL, O_NONBLOCK);
   if (rv == 0) {
     if (dodebug) { printf("nonblock set\n"); }
   } else {
@@ -196,111 +194,18 @@ void Bluetooth::connect(const char *btaddr)
 
 void Bluetooth::send(unsigned char *buffer, unsigned int num_bytes)
 {
-
   bool doWrite = true;
   bool doRead  = false;
-  //int status = readySocket(0, 1000,&doRead, &doWrite );
+  int status = readySocket(0, 1000, &doRead, &doWrite);
 
-  //std::cerr << " SEND " << status << " WRITE " << doWrite <<  std::endl;
-  unsigned char buf[1024], lbuf[1024];
-  ssize_t x, xr;
-
-#if 1
-  unsigned int i=0;
-  byte = (unsigned char *) malloc(num_bytes*sizeof(unsigned char));
-  while(i<num_bytes){
-    byte[i]=buffer[i];
-    //printf("send: %d\n ",buffer[i]);
-    i++;
-  }
-#endif
   number_bytes = ::write(nxtsock, buffer, num_bytes);
 
   if(number_bytes!= num_bytes){
-    free(byte);
+      cout << "Wrote only " << number_bytes << " of " << num_bytes << endl;
     throw Nxt_exception::Nxt_exception("send","Bluetooth", ERROR_WRITING_COM_PORT);
-  } else if (dodebug) {
-    //std::cerr << "sent " << number_bytes << std::endl;
   }
-  free(byte);
-  return;
 }
 
-
-
-/*
-int sendnew(char *sbuf, int slen, char **rbuf, int *rlen, int errpos)
-{
-fd_set set;
-int maxfd = nxtsock;
-struct timeval timeout = {0,2};
-int i;
-unsigned char buf[1024], lbuf[1024];
-ssize_t x, xr;
-unsigned short int si  = (short int) slen;
-unsigned short int sr;
-char *eptr = NULL;
-
-FD_ZERO(&set);
-FD_SET(nxtsock, &set);
-
-memcpy(&buf[0], &si, 2);
-memcpy(&buf[2], sbuf, slen);
-
-*rbuf = NULL;
-
-x = write(nxtsock, &buf, slen + 2);
-if (x < 0) {
-        perror("write: ");
-        return(-1);
-        }
-if (dodebug) {
-        printf("write x %d: ", slen+2);
-
-        }
-
-if ((unsigned char)sbuf[0] == NXT_NORET) { return(0); }
-
-while  (select(maxfd, &set, 0, 0, &timeout) < 0) {
-        printf("got nothing\n");
-        }
-
-while ((xr = read(nxtsock, &lbuf, 2)) == -1) {
-        }
-
-if (xr != 2) {
-        perror("read: ");
-        return(-1);
-        }
-
-memcpy(&sr, &lbuf[0], 2);
-
-while ((xr = read(nxtsock, &lbuf, (int)sr)) == -1) {
-        }
-
-printf("read x %d\n", xr);
-if (xr != (int)sr) { printf("got mismatch of %d and %d\n", xr, sr); }
-
-if ((unsigned char)lbuf[errpos] != 0) {
-        int ret = (unsigned char) lbuf[errpos];
-        if (dodebug) {
-                //eptr = _nxt_error((unsigned char) lbuf[errpos]);
-                fprintf(stderr, "Error %02x: %s\n", (unsigned char)lbuf[errpos], eptr ? eptr : "Unknown");
-                }
-        return(ret);
-        }
-
-
-printf("return buf size %d\n", sr);
-*rbuf = (char *) malloc((int)sr);
-memcpy(*rbuf, &lbuf, (int)sr);
-*rlen = (int)sr;
-
-//if (dodebug) { debug_buf(*rbuf, *rlen); }
-return(0);
-}
-
-*/
 
 
 void Bluetooth::disconnect(){
@@ -417,8 +322,6 @@ void Bluetooth::receive(unsigned char *buffer, unsigned int length){
   FD_SET(nxtsock, &set);
   struct timeval timeout = {0,2};
   unsigned int i=0;
-  unsigned char buf[1024], lbuf[1024];
-
 
   byte = (unsigned char *) malloc(length*sizeof(unsigned char));
   number_bytes = 0;

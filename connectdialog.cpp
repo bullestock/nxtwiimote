@@ -1,3 +1,20 @@
+// Copyright 2009 Torsten Martinsen <torsten@bullestock.net>
+
+// This file is part of nxtwiimote.
+
+// Nxtwiimote is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// Nxtwiimote is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU General Public License
+// along with nxtwiimote.  If not, see <http://www.gnu.org/licenses/>.
+
 #include <iostream>
 #include <iomanip>
 
@@ -110,7 +127,8 @@ void ConnectDialog::ScanDone(int exitCode, QProcess::ExitStatus exitStatus)
         return;
     m_deviceCombo->clear();
     QStringListIterator it(lines);
-    QStringList devices;
+    QSettings settings;
+    QStringList devices(settings.value("btdevices").toStringList());
     while (it.hasNext())
     {
         QString line(it.next());
@@ -125,8 +143,9 @@ void ConnectDialog::ScanDone(int exitCode, QProcess::ExitStatus exitStatus)
         const bool isWiimote = (name == "Nintendo RVL-CNT-01");
         if (m_isNxt != isWiimote)
             m_deviceCombo->addItem(name + QString(" (") + address + QString(")"));
-        devices << (address + QString("\t") + name);
+        QString item(address + QString("\t") + name);
+        if (!devices.contains(item))
+            devices << item;
     }
-    QSettings settings;
     settings.setValue("btdevices", devices);
 }
