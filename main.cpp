@@ -28,8 +28,8 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationDomain("bullestock.net");
     QCoreApplication::setApplicationName("NXT Remote");
 
-    MainWindow window;
+    MainWindow window(argc, argv);
     QObject::connect(&app, SIGNAL(lastWindowClosed()), &window, SLOT(Quit()));
-    window.show();
+    window.Show();
     return app.exec();
 }

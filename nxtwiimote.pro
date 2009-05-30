@@ -19,7 +19,7 @@ TEMPLATE = app
 TARGET = 
 DEPENDPATH += .
 INCLUDEPATH += . libnxtbt/include
-LIBS += -lcwiimote -L libnxtbt/src -lnxtbt
+LIBS += -lcwiimote -L libnxtbt/src -lnxtbt -lboost_program_options
 
 # Input
 HEADERS += mainwindow.h connectdialog.h setupdialog.h

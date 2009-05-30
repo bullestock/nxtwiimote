@@ -17,6 +17,10 @@
 
 #include <sstream>
 
+#include <boost/program_options/options_description.hpp>
+#include <boost/program_options/parsers.hpp>
+#include <boost/program_options/variables_map.hpp>
+
 #include <QMutexLocker>
 #include <QSettings>
 #include <QtDebug>
@@ -40,10 +44,12 @@ extern "C" {
 using namespace std;
 
 
-MainWindow::MainWindow()
+MainWindow::MainWindow(int argc, char *argv[])
     : m_wiiThread(this),
       m_connectedToWii(false),
       m_topWidget(0),
+      m_actionSlider(0),
+      m_actionValueLabel(0),
       m_portSetup(new PortSetup)
 {
     QSettings settings;
@@ -52,11 +58,47 @@ MainWindow::MainWindow()
     CreateActions();
     CreateMenus();
 
-    // TODO: Create common controls for motor mode etc.
-    
     setWindowTitle(tr("NXT Remote"));
     setMinimumSize(160, 160);
     resize(480, 320);
+
+    boost::program_options::options_description desc("Allowed options");
+    desc.add_options()
+        ("help", "Show this help message")
+        ("connect-nxt,n", boost::program_options::value<string>(), "Connect to specified NXT device")
+        ("connect-wiimote,w", boost::program_options::value<string>(), "Connect to specified Wiimote device");
+    
+    boost::program_options::variables_map vm;
+    boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
+    boost::program_options::notify(vm);    
+
+    if (vm.count("help"))
+    {
+        ostringstream s;
+        desc.print(s);
+        QMessageBox::information(this, tr("Options"), s.str().c_str());
+    }
+    if (vm.count("connect-wiimote"))
+    {
+        m_wiimoteAddress = vm["connect-wiimote"].as<string>().c_str();
+    }
+    if (vm.count("connect-nxt"))
+    {
+        m_nxtAddress = vm["connect-nxt"].as<string>().c_str();
+    }
+
+    statusBar()->showMessage("Ready");
+}
+
+
+void MainWindow::Show()
+{
+    show();
+    if (!m_wiimoteAddress.isEmpty())
+        QTimer::singleShot(200, this, SLOT(ConnectToSelectedWiimote()));
+
+    if (!m_nxtAddress.isEmpty())
+        QTimer::singleShot(400, this, SLOT(ConnectToSelectedNxt()));
 }
 
 
@@ -88,13 +130,19 @@ void MainWindow::ConnectToNxt()
         return;
     QString device = dlg.GetSelection();
     qDebug() << "Selected device:" << device;
-    QString address = device.section('(', 1).left(17);
+    m_nxtAddress = device.section('(', 1).left(17);
+}
+
+
+void MainWindow::ConnectToSelectedNxt()
+{
+    statusBar()->showMessage("Connecting to NXT");
+    qApp->processEvents();
 
     m_nxtConnection.reset(new nxt::Bluetooth);
-    QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
     try
     {
-        m_nxtConnection->connect(address.toAscii());
+        m_nxtConnection->connect(m_nxtAddress.toAscii());
 
         nxt::Brick brick(m_nxtConnection.get());
         nxt::Device_info info;
@@ -106,16 +154,16 @@ void MainWindow::ConnectToNxt()
     }
     catch (const nxt::Nxt_exception& e)
     {
-        QApplication::restoreOverrideCursor();
         QMessageBox::critical(this, tr("NXT"),
                               tr("Unable to connect to NXT: %1").arg(e.what()));
         m_nxtConnection.reset();
+        statusBar()->clearMessage();
         return;
     }
-    QApplication::restoreOverrideCursor();
 
     m_connectNxtAct->setEnabled(false);
     m_disconnectNxtAct->setEnabled(true);
+    statusBar()->showMessage("Connected to NXT");
 }
 
 
@@ -126,16 +174,26 @@ void MainWindow::ConnectToWiimote()
         return;
     QString device = dlg.GetSelection();
     qDebug() << "Selected device:" << device;
-    QString address = device.section('(', 1).left(17);
-    qDebug() << "Address:" << address;
+    m_wiimoteAddress = device.section('(', 1).left(17);
+    qDebug() << "Address:" << m_wiimoteAddress;
 
-    memset(&(m_wiiThread.m_wiimoteInfo), sizeof(wiimote_t), 0);
+    ConnectToSelectedWiimote();
+}
+
+
+void MainWindow::ConnectToSelectedWiimote()
+{
+    statusBar()->showMessage("Connecting to Wiimote");
+    qApp->processEvents();
+
+    memset(&(m_wiiThread.m_wiimoteInfo), 0, sizeof(wiimote_t));
     m_wiiThread.m_wiimoteInfo.link.device = 1;
 
-    if (wiimote_connect(&m_wiiThread.m_wiimoteInfo, address.toAscii()) < 0)
+    if (wiimote_connect(&m_wiiThread.m_wiimoteInfo, m_wiimoteAddress.toAscii()) < 0)
     {
         QMessageBox::critical(this, tr("Wiimote"),
                               tr("Unable to connect to Wiimote: %1").arg(wiimote_get_error()));
+        statusBar()->clearMessage();
         return;
     }
     m_connectedToWii = true;
@@ -145,6 +203,7 @@ void MainWindow::ConnectToWiimote()
     m_wiiThread.start();
 
     ShowWiimoteControls();
+    statusBar()->showMessage("Connected to Wiimote");
 }
 
 
@@ -206,10 +265,19 @@ void MainWindow::TiltClicked()
 }
 
 
+void MainWindow::ActionSliderMoved(int val)
+{
+    m_actionValueLabel->setText(QString("%1").arg(val));
+}
+
+
 void MainWindow::About()
 {
-    QMessageBox::about(this, tr("About nxtremote"),
-                       tr("TODO."));
+    QMessageBox::about(this, tr("About nxtwiimote"),
+                       tr("Nxtwiimote is free software: you can redistribute it and/or modify\n"
+                          "it under the terms of the GNU General Public License as published by\n"
+                          "the Free Software Foundation, either version 3 of the License, or\n"
+                          "(at your option) any later version."));
 }
 
 void MainWindow::CreateActions()
@@ -256,7 +324,6 @@ void MainWindow::CreateMenus()
 
 void MainWindow::HideControls()
 {
-    m_wiiThread.SetInfoLabel(0);
     delete m_topWidget;
     m_topWidget = 0;
 }
@@ -266,9 +333,6 @@ void MainWindow::ShowWiimoteControls()
 {
     HideControls();
 
-    QLabel* label = new QLabel(this);
-    m_wiiThread.SetInfoLabel(label);
-    
     QGroupBox* bGroup = new QGroupBox(tr("Control"), this);
     QVBoxLayout* controlVBox = new QVBoxLayout;
     QRadioButton* nunchukButton = new QRadioButton(tr("&Nunchuk"));
@@ -281,7 +345,7 @@ void MainWindow::ShowWiimoteControls()
 
     QVBoxLayout* vbox = new QVBoxLayout;
     vbox->addWidget(bGroup);
-    vbox->addWidget(label);
+    vbox->addWidget(CreateStandardControls(true));
 
     m_topWidget = new QWidget;
     m_topWidget->setLayout(vbox);
@@ -299,15 +363,41 @@ void MainWindow::ShowMouseControls()
 }
 
 
-
+QWidget* MainWindow::CreateStandardControls(bool wiimote)
+{
+    QGroupBox* aGroup = new QGroupBox(tr("Action"), this);
+    QVBoxLayout* aVBox = new QVBoxLayout;
+    m_actionValueLabel = new QLabel(this);
+    m_actionValueLabel->setAlignment(Qt::AlignHCenter);
+    aVBox->addWidget(m_actionValueLabel);
+    QHBoxLayout* aHBox = new QHBoxLayout;
+    QLabel* leftLabel = new QLabel(this);
+    leftLabel->setText("1");
+    aHBox->addWidget(leftLabel);
+    m_actionSlider = new QSlider(Qt::Horizontal, this);
+    m_actionSlider->setMinimum(0);
+    m_actionSlider->setMaximum(100);
+    connect(m_actionSlider, SIGNAL(valueChanged(int)), this, SLOT(ActionSliderMoved(int)));
+    aHBox->addWidget(m_actionSlider);
+    QLabel* rightLabel = new QLabel(this);
+    rightLabel->setText("2");
+    aHBox->addWidget(rightLabel);
+    aVBox->addLayout(aHBox);
+    QLabel* helpLabel = new QLabel(this);
+    helpLabel->setText(wiimote ? tr("Use C and Z to control action") :
+                       tr("Use - and + to control action"));
+    aVBox->addWidget(helpLabel);
+    aVBox->addStretch(1);
+    aGroup->setLayout(aVBox);
+    return aGroup;
+}
 
 // ----------------------------------------------------------------
 
 
 MainWindow::WiiThread::WiiThread(MainWindow* parent)
     : m_parent(parent),
-      m_mode(Nunchuk),
-      m_infoLabel(0)
+      m_mode(Nunchuk)
 {
 }
 
@@ -318,22 +408,19 @@ void MainWindow::WiiThread::SetMode(Mode mode)
 }
 
 
-void MainWindow::WiiThread::SetInfoLabel(QLabel* label)
-{
-    QMutexLocker lock(&m_mutex);
-    m_infoLabel = label;
-}
-
-
 void MainWindow::WiiThread::run()
 {
     m_wiimoteInfo.led.bits = 1;
     m_wiimoteInfo.rumble = 0;
 
+    QTime lastNxtUpdate;
+    lastNxtUpdate.start();
+
+    int motorsOld[3] = { 0, 0, 0 };
+    int motorAction = 0;
+    
     while (wiimote_is_open(&m_wiimoteInfo))
     {
-        QTime w;
-        w.start();
         if (wiimote_update(&m_wiimoteInfo) < 0)
         {
             QMessageBox::critical(m_parent, tr("Wiimote"),
@@ -341,7 +428,6 @@ void MainWindow::WiiThread::run()
             m_parent->DisconnectWiimote();
             break;
         }
-        int wms = w.elapsed();
         
         // Enable IR-sensor and accelerometer
         m_wiimoteInfo.mode.ir = 1;
@@ -352,23 +438,45 @@ void MainWindow::WiiThread::run()
         switch (m_mode)
         {
         case Nunchuk:
+        {
             // Value in neutral is around 128, extremes are approx. 32 and 224
             // Subtracting 128 scales these values nicely to around +- 100.
             // We add a dead zone of +- 8.
             x = m_wiimoteInfo.ext.nunchuk.joyx - 128;
             if (abs(x) < 8)
                 x = 0;
+            else if (abs(x) < 20)
+                x *= 2; // Increase power at low levels
               y = m_wiimoteInfo.ext.nunchuk.joyy - 128;
             if (abs(y) < 8)
                 y = 0;
+            else if (abs(y) < 20)
+                y *= 2; // Increase power at low levels
+
+            QSlider* slider = m_parent->GetActionSlider();
+            int sliderValue = slider->value();
+            if (m_wiimoteInfo.keys.one)
             {
-                QMutexLocker lock(&m_mutex);
-                if (m_infoLabel)
-                {
-                    m_infoLabel->setText(QString("X: %1\nY: %2").arg(x).arg(y));
-                }
+                if (sliderValue)
+                    --sliderValue;
             }
-            break;
+            else if (m_wiimoteInfo.keys.two)
+            {
+                if (sliderValue < 100)
+                    ++sliderValue;
+            }
+            slider->setValue(sliderValue);
+            qDebug() << "NK" << m_wiimoteInfo.ext.nunchuk.keys.z << m_wiimoteInfo.ext.nunchuk.keys.c;
+            if (m_wiimoteInfo.ext.nunchuk.keys.z)
+            {
+                motorAction = -sliderValue;
+            }
+            else if (m_wiimoteInfo.ext.nunchuk.keys.c)
+            {
+                motorAction = sliderValue;
+            }
+        }
+        break;
 
         case Tilt:
             // TODO
@@ -396,22 +504,25 @@ void MainWindow::WiiThread::run()
         int motors[3] = { 0, 0, 0 };
         motors[ps.motor1 - nxt::OUT_A] = motor1;
         motors[ps.motor2 - nxt::OUT_A] = motor2;
-        motors[ps.actionMotor - nxt::OUT_A] = 0;
+        motors[ps.actionMotor - nxt::OUT_A] = motorAction;
 
         //qDebug() << "M:" << motors[0] << motors[1] << motors[2];
 
-        QTime n;
-        n.start();
         boost::shared_ptr<nxt::Bluetooth> nxtConnection = m_parent->GetNxtConnection();
-        if (nxtConnection)
+        if (nxtConnection && (lastNxtUpdate.elapsed() >= 100))
         {
             for (int i = 0; i < 3; ++i)
             {
+                if (motors[i] == motorsOld[i])
+                    continue;
+                qDebug() << "Update motor" << ('A'+i);
+                motorsOld[i] = motors[i];
                 nxt::Motor m(static_cast<nxt::Motor_port>(nxt::OUT_A+i),
                              nxtConnection.get());
                 try
                 {
                     m.on(motors[i], 0, false);
+                    motorsOld[i] = motors[i];
                 }
                 catch (const nxt::Nxt_exception& e)
                 {
@@ -419,10 +530,7 @@ void MainWindow::WiiThread::run()
                 }
             }
         }
-        int nms = n.elapsed();
 
-        qDebug() << "Wii" << wms << "NXT" << nms;
-        
         /*
         qDebug() << "MODE" << m_wiimoteInfo.mode.bits;
 

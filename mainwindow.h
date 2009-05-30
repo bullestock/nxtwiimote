@@ -43,6 +43,7 @@ class QActionGroup;
 class QComboBox;
 class QLabel;
 class QMenu;
+class QSlider;
 QT_END_NAMESPACE
 
 class PortSetup;
@@ -54,11 +55,15 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow();
+    MainWindow(int argc, char *argv[]);
 
+    void Show();
+    
     PortSetup GetSetup() const;
 
     boost::shared_ptr<nxt::Bluetooth> GetNxtConnection();
+
+    QSlider* GetActionSlider() { return m_actionSlider; }
 
 public slots:
     void Quit();
@@ -66,13 +71,16 @@ public slots:
 private slots:
     void ConnectToNxt();
     void ConnectToWiimote();
+    void ConnectToSelectedNxt();
+    void ConnectToSelectedWiimote();
     void DisconnectNxt();
     void DisconnectWiimote();
     void ShowSetupDialog();
     void NunchukClicked();
     void TiltClicked();
+    void ActionSliderMoved(int);
     void About();
-
+    
 private:
     class WiiThread : public QThread
     {
@@ -87,8 +95,6 @@ private:
 
         void SetMode(Mode mode);
 
-        void SetInfoLabel(QLabel* label);
-        
         wiimote_t m_wiimoteInfo;
         
     private:
@@ -96,7 +102,6 @@ private:
 
         MainWindow* m_parent;
         Mode m_mode;
-        QLabel* m_infoLabel;
         QMutex m_mutex;
     };
 
@@ -105,7 +110,8 @@ private:
     void HideControls();
     void ShowWiimoteControls();
     void ShowMouseControls();
-    
+    QWidget* CreateStandardControls(bool wiimote);
+
     QMenu* m_deviceMenu;
     QMenu* m_setupMenu;
     QMenu* m_helpMenu;
@@ -120,8 +126,12 @@ private:
     boost::shared_ptr<nxt::Bluetooth> m_nxtConnection;
     QMutex m_nxtConnectionMutex;
     QWidget* m_topWidget;
+    QSlider* m_actionSlider;
+    QLabel* m_actionValueLabel;
     PortSetup* m_portSetup;
     mutable QMutex m_portSetupMutex;
+    QString m_wiimoteAddress;
+    QString m_nxtAddress;
 };
 
 #endif
