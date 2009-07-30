@@ -55,8 +55,6 @@ struct PortSetup
     bool             actionCoast;
 };
 
-QString GetAsString(nxt::Sensor_type type);
-
 std::ostream& operator<<(std::ostream&, const PortSetup&);
 
 #endif

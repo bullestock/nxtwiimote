@@ -31,6 +31,7 @@ using namespace std;
 
 
 ConnectDialog::ConnectDialog(QWidget* parent,
+                             QString defaultAddress,
                              bool isNxt)
     : QDialog(parent),
       m_isNxt(isNxt),
@@ -41,6 +42,7 @@ ConnectDialog::ConnectDialog(QWidget* parent,
 
     setWindowTitle(isNxt ? tr("Connect to NXT") : tr("Connect to Wiimote"));
 
+    int selectedIndex = -1;
     QSettings settings;
     QVariant devices(settings.value("btdevices"));
     if (!devices.isNull())
@@ -55,9 +57,16 @@ ConnectDialog::ConnectDialog(QWidget* parent,
             QString name(parts[1]);
             const bool isWiimote = (name == "Nintendo RVL-CNT-01");
             if (isNxt != isWiimote)
+            {
+                if (address == defaultAddress)
+                    selectedIndex = m_deviceCombo->count();
                 m_deviceCombo->addItem(name + QString(" (") + address + QString(")"));
+            }
         }
     }
+
+    if (selectedIndex >= 0)
+        m_deviceCombo->setCurrentIndex(selectedIndex);
 
     m_scanButton = m_buttonBox->addButton("&Scan", QDialogButtonBox::ActionRole);
     QObject::connect(m_buttonBox, SIGNAL(clicked(QAbstractButton*)),

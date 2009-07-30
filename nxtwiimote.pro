@@ -23,5 +23,6 @@ LIBS += -lcwiimote -L libnxtbt/src -lnxtbt -lboost_program_options
 
 # Input
 HEADERS += mainwindow.h connectdialog.h setupdialog.h
-SOURCES += main.cpp mainwindow.cpp connectdialog.cpp setupdialog.cpp portsetup.cpp
+SOURCES += main.cpp mainwindow.cpp connectdialog.cpp setupdialog.cpp portsetup.cpp sensorutil.cpp
 FORMS   += connectdialog.ui setupdialog.ui
+RESOURCES += nxtwiimote.qrc

@@ -15,34 +15,18 @@
 // You should have received a copy of the GNU General Public License
 // along with nxtwiimote.  If not, see <http://www.gnu.org/licenses/>.
 
-#include <QProcess>
+#ifndef sensorutil_h
+#define sensorutil_h
 
-#include "ui_connectdialog.h"
+#include <QString>
+
+#include <sensor.h>
 
 
-class QProgressDialog;
+QString GetAsString(nxt::Sensor_type type, bool brief = false);
 
+QString GetUnit(nxt::Sensor_type type);
 
-class ConnectDialog : public QDialog,
-                      private Ui::ConnectDialog
-{
-    Q_OBJECT
+nxt::Sensor_mode GetMode(nxt::Sensor_type type);
 
-public:
-    ConnectDialog(QWidget* parent,
-                  QString defaultAddress,
-                  bool isNxt);
-
-    QString GetSelection() const;
-
-private slots:
-    void ScanClicked(QAbstractButton*);
-    void CancelScan();
-    void ScanDone(int exitCode, QProcess::ExitStatus exitStatus);
-    
-private:
-    bool m_isNxt;
-    QPushButton* m_scanButton;
-    QProcess* m_process;
-    QProgressDialog* m_progressDialog;
-};
+#endif

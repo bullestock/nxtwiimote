@@ -21,6 +21,7 @@
 #include <QDebug>
 #include <QMessageBox>
 
+#include "sensorutil.h"
 #include "setupdialog.h"
 
 
@@ -79,6 +80,15 @@ SetupDialog::SetupDialog(QWidget* parent,
 
 void SetupDialog::OkClicked()
 {
+    m_portSetup.sensors[0] =
+        static_cast<nxt::Sensor_type>(m_sensorCombo1->itemData(m_sensorCombo1->currentIndex()).toInt());
+    m_portSetup.sensors[1] =
+        static_cast<nxt::Sensor_type>(m_sensorCombo2->itemData(m_sensorCombo2->currentIndex()).toInt());
+    m_portSetup.sensors[2] =
+        static_cast<nxt::Sensor_type>(m_sensorCombo3->itemData(m_sensorCombo3->currentIndex()).toInt());
+    m_portSetup.sensors[3] =
+        static_cast<nxt::Sensor_type>(m_sensorCombo4->itemData(m_sensorCombo4->currentIndex()).toInt());
+
     m_portSetup.driveReverse = m_driveRevCheck->isChecked();
     m_portSetup.driveCoast = m_driveCoastCheck->isChecked();
     m_portSetup.actionReverse = m_actionRevCheck->isChecked();

@@ -22,6 +22,7 @@
 #include <boost/program_options/variables_map.hpp>
 
 #include <QMutexLocker>
+#include <QPixmap>
 #include <QSettings>
 #include <QtDebug>
 #include <QtGui>
@@ -36,6 +37,7 @@ extern "C" {
 
 #include "connectdialog.h"
 #include "portsetup.h"
+#include "sensorutil.h"
 #include "setupdialog.h"
 
 #include "mainwindow.h"
@@ -50,8 +52,13 @@ MainWindow::MainWindow(int argc, char *argv[])
       m_topWidget(0),
       m_actionSlider(0),
       m_actionValueLabel(0),
+      m_batteryLevel(0),
+      m_sensorsLayout(0),
       m_portSetup(new PortSetup)
 {
+    for (int i = 0; i < 3; ++i)
+        m_motors[i] = m_motorsOld[i] = 0;
+
     QSettings settings;
     m_portSetup->Load(settings);
 
@@ -65,8 +72,12 @@ MainWindow::MainWindow(int argc, char *argv[])
     boost::program_options::options_description desc("Allowed options");
     desc.add_options()
         ("help", "Show this help message")
-        ("connect-nxt,n", boost::program_options::value<string>(), "Connect to specified NXT device")
-        ("connect-wiimote,w", boost::program_options::value<string>(), "Connect to specified Wiimote device");
+        ("connect-nxt,n",
+         boost::program_options::value<string>(),
+         "Connect to specified NXT device")
+        ("connect-wiimote,w",
+         boost::program_options::value<string>(),
+         "Connect to specified Wiimote device");
     
     boost::program_options::variables_map vm;
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -86,7 +97,10 @@ MainWindow::MainWindow(int argc, char *argv[])
     {
         m_nxtAddress = vm["connect-nxt"].as<string>().c_str();
     }
+    qDebug() << "5";
 
+    ShowMouseControls();
+    
     statusBar()->showMessage("Ready");
 }
 
@@ -109,10 +123,154 @@ PortSetup MainWindow::GetSetup() const
 }
 
 
-boost::shared_ptr<nxt::Bluetooth> MainWindow::GetNxtConnection()
+void MainWindow::UpdateNxt()
 {
-    QMutexLocker lock(&m_nxtConnectionMutex);
-    return m_nxtConnection;
+    if (!m_nxtConnection)
+        return;
+
+    QMutexLocker lock(&m_motorsMutex);
+    
+    statusBar()->showMessage(QString("%1 %2 %3 %4").
+                             arg(m_motorInfo).
+                             arg(m_motors[0]).arg(m_motors[1]).arg(m_motors[2]));
+    for (int i = 0; i < 3; ++i)
+    {
+        if (m_motors[i] == m_motorsOld[i])
+            continue;
+        qDebug() << "Update motor" << ('A'+i);
+        nxt::Motor m(static_cast<nxt::Motor_port>(nxt::OUT_A+i),
+                     m_nxtConnection.get());
+        try
+        {
+            m.on(m_motors[i], 0, false);
+            m_motorsOld[i] = m_motors[i];
+        }
+        catch (const nxt::Nxt_exception& e)
+        {
+            qDebug() << "Motor" << i << "exception: P" << m_motors[i] << e.what() << e.who().c_str();
+        }
+    }
+
+    // Sensors, battery
+
+    PortSetup portSetup(GetSetup());
+    size_t nofSensors = 0;
+    for (int i = 0; i < PortSetup::NOF_SENSOR_PORTS; ++i)
+    {
+        nxt::Sensor_type st = portSetup.sensors[i];
+        if (st != nxt::NO_SENSOR)
+            ++nofSensors;
+    }
+    if (m_sensors.size() != nofSensors)
+    {
+        qDebug() << "Old size" << m_sensors.size() << "new" << nofSensors;
+        m_sensors.clear();
+        m_sensorLabels.clear();
+        int row = 0;
+        for (int i = 0; i < PortSetup::NOF_SENSOR_PORTS; ++i)
+        {
+            nxt::Sensor_type st = portSetup.sensors[i];
+            if (st == nxt::NO_SENSOR)
+                continue;
+            qDebug() << "new";
+            m_sensors.push_back(new nxt::Sensor(static_cast<nxt::Sensor_port>(nxt::IN_1+i),
+                                                m_nxtConnection.get(), st, GetMode(st)));
+            qDebug() << "init";
+            m_sensors.back().init();
+
+            QLabel* l = new QLabel(this);
+            l->setText(tr("%1 (%2)").arg(GetAsString(portSetup.sensors[i], true)).arg(i));
+            m_sensorsLayout->addWidget(l, row, 0, Qt::AlignTop);
+            l = new QLabel(this);
+            l->setText(QString("- ")+GetUnit(portSetup.sensors[i]));
+            m_sensorLabels.append(l);
+            m_sensorsLayout->addWidget(l, row++, 1);
+        }
+        m_sensorsLayout->setRowStretch(row-1, 1);
+    }
+
+    int index = 0;
+    for (int i = 0; i < PortSetup::NOF_SENSOR_PORTS; ++i)
+    {
+        nxt::Sensor_type st = portSetup.sensors[i];
+        if (st == nxt::NO_SENSOR)
+            continue;
+        if (st != m_sensors[index].get_type())
+        {
+            qDebug() << "Old type" << m_sensors[index].get_type() << "new" << st;
+            m_sensors.replace(index,
+                              new nxt::Sensor(static_cast<nxt::Sensor_port>(nxt::IN_1+i),
+                                              m_nxtConnection.get(), st, GetMode(st)));
+            qDebug() << "init";
+            m_sensors[index].init();
+        }
+        qDebug() << "read";
+        int value = m_sensors[index].read();
+        qDebug() << "value" << value;
+        m_sensorLabels[index]->setText(QString("%1").arg(value)+GetUnit(st));
+        ++index;
+    }
+
+    if (m_lastBatteryUpdate.isNull() || (m_lastBatteryUpdate.elapsed() > 20000))
+    {
+        try
+        {
+            nxt::Brick brick(m_nxtConnection.get());
+            int mV = brick.get_battery_level();
+            m_batteryLevel->setValue(mV);
+            m_lastBatteryUpdate.start();
+        }
+        catch (const nxt::Nxt_exception& e)
+        {
+            qDebug() << "NXT brick exception:" << e.what() << e.who().c_str();
+        }
+    }
+    
+    // Schedule next update
+    QTimer::singleShot(200, this, SLOT(UpdateNxt()));
+}
+
+
+void MainWindow::ButtonNWClicked()
+{
+}
+
+void MainWindow::ButtonNClicked()
+{
+}
+
+void MainWindow::ButtonNEClicked()
+{
+}
+
+void MainWindow::ButtonWClicked()
+{
+}
+
+void MainWindow::ButtonEClicked()
+{
+}
+
+void MainWindow::ButtonSWClicked()
+{
+}
+
+void MainWindow::ButtonSClicked()
+{
+}
+
+void MainWindow::ButtonSEClicked()
+{
+}
+
+
+
+void MainWindow::SetMotors(int motors[3], QString info)
+{
+    QMutexLocker lock(&m_motorsMutex);
+    for (int i = 0; i < 3; ++i)
+        m_motors[i] = motors[i];
+    m_motorInfo = info;
 }
 
 
@@ -125,12 +283,14 @@ void MainWindow::Quit()
 
 void MainWindow::ConnectToNxt()
 {
-    ConnectDialog dlg(this, true);
+    QSettings settings;
+    ConnectDialog dlg(this, settings.value("lastnxt").toString(), true);
     if (dlg.exec() != QDialog::Accepted)
         return;
     QString device = dlg.GetSelection();
     qDebug() << "Selected device:" << device;
     m_nxtAddress = device.section('(', 1).left(17);
+    ConnectToSelectedNxt();
 }
 
 
@@ -138,6 +298,12 @@ void MainWindow::ConnectToSelectedNxt()
 {
     statusBar()->showMessage("Connecting to NXT");
     qApp->processEvents();
+
+    if (m_nxtAddress == "default")
+    {
+        QSettings settings;
+        m_nxtAddress = settings.value("lastnxt").toString();
+    }
 
     m_nxtConnection.reset(new nxt::Bluetooth);
     try
@@ -147,7 +313,7 @@ void MainWindow::ConnectToSelectedNxt()
         nxt::Brick brick(m_nxtConnection.get());
         nxt::Device_info info;
         brick.get_device_info(info);
-        qDebug() << "Connected to NXT named " << info.name.c_str();
+        qDebug() << "Connected to NXT named" << info.name.c_str();
 
         // Play a sound to indicate successful connection
         brick.play_tone(440, 200, true);
@@ -164,12 +330,24 @@ void MainWindow::ConnectToSelectedNxt()
     m_connectNxtAct->setEnabled(false);
     m_disconnectNxtAct->setEnabled(true);
     statusBar()->showMessage("Connected to NXT");
+
+    QSettings settings;
+    qDebug() << "Saving NXT address" << m_nxtAddress;
+    settings.setValue("lastnxt", m_nxtAddress);
+
+    if (m_connectedToWii)
+        ShowWiimoteControls();
+    else
+        ShowMouseControls();
+
+    QTimer::singleShot(100, this, SLOT(UpdateNxt()));
 }
 
 
 void MainWindow::ConnectToWiimote()
 {
-    ConnectDialog dlg(this, false);
+    QSettings settings;
+    ConnectDialog dlg(this, settings.value("lastwiimote").toString(), false);
     if (dlg.exec() != QDialog::Accepted)
         return;
     QString device = dlg.GetSelection();
@@ -185,6 +363,12 @@ void MainWindow::ConnectToSelectedWiimote()
 {
     statusBar()->showMessage("Connecting to Wiimote");
     qApp->processEvents();
+
+    if (m_wiimoteAddress == "default")
+    {
+        QSettings settings;
+        m_wiimoteAddress = settings.value("lastwiimote").toString();
+    }
 
     memset(&(m_wiiThread.m_wiimoteInfo), 0, sizeof(wiimote_t));
     m_wiiThread.m_wiimoteInfo.link.device = 1;
@@ -204,6 +388,9 @@ void MainWindow::ConnectToSelectedWiimote()
 
     ShowWiimoteControls();
     statusBar()->showMessage("Connected to Wiimote");
+
+    QSettings settings;
+    settings.setValue("lastwiimote", m_wiimoteAddress);
 }
 
 
@@ -294,7 +481,7 @@ void MainWindow::CreateActions()
     m_disconnectNxtAct->setEnabled(false);
     connect(m_disconnectNxtAct, SIGNAL(triggered()), this, SLOT(DisconnectNxt()));
 
-    m_disconnectWiimoteAct = new QAction(tr("D&isconnect from Wii"), this);
+    m_disconnectWiimoteAct = new QAction(tr("D&isconnect from Wiimote"), this);
     m_disconnectWiimoteAct->setEnabled(false);
     connect(m_disconnectWiimoteAct, SIGNAL(triggered()), this, SLOT(DisconnectWiimote()));
 
@@ -346,6 +533,7 @@ void MainWindow::ShowWiimoteControls()
     QVBoxLayout* vbox = new QVBoxLayout;
     vbox->addWidget(bGroup);
     vbox->addWidget(CreateStandardControls(true));
+    vbox->addLayout(CreateSensorControls());
 
     m_topWidget = new QWidget;
     m_topWidget->setLayout(vbox);
@@ -355,13 +543,103 @@ void MainWindow::ShowWiimoteControls()
     connect(tiltButton, SIGNAL(clicked()), this, SLOT(TiltClicked()));
     // Set default
     NunchukClicked();
+
+    // Why is this necessary?
+    resize(480, 520);
 }
 
 
 void MainWindow::ShowMouseControls()
 {
+    HideControls();
+
+    QGroupBox* driveGroup = new QGroupBox(tr("Drive"), this);
+    QGridLayout* driveButtonsLayout = new QGridLayout;
+    driveGroup->setLayout(driveButtonsLayout);
+    QPixmap pixmap(":/arrowup.png");
+    QIcon icon(pixmap);
+    QPushButton* button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonNClicked()));
+    driveButtonsLayout->addWidget(button, 0, 1);
+    QMatrix m;
+    m.rotate(-45);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonNWClicked()));
+    driveButtonsLayout->addWidget(button, 0, 0);
+    m.reset();
+    m.rotate(45);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonNEClicked()));
+    driveButtonsLayout->addWidget(button, 0, 2);
+    m.reset();
+    m.rotate(-90);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonWClicked()));
+    driveButtonsLayout->addWidget(button, 1, 0);
+    m.reset();
+    m.rotate(90);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonEClicked()));
+    driveButtonsLayout->addWidget(button, 1, 2);
+    m.reset();
+    m.rotate(-135);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonSEClicked()));
+    driveButtonsLayout->addWidget(button, 2, 0);
+    m.reset();
+    m.rotate(180);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonSClicked()));
+    driveButtonsLayout->addWidget(button, 2, 1);
+    m.reset();
+    m.rotate(135);
+    icon = QIcon(pixmap.transformed(m));
+    button = new QPushButton(icon, "", this);
+    connect(button, SIGNAL(clicked()), this, SLOT(ButtonSWClicked()));
+    driveButtonsLayout->addWidget(button, 2, 2);
+
+    QVBoxLayout* vbox = new QVBoxLayout;
+    vbox->addWidget(driveGroup);
+    vbox->addWidget(CreateStandardControls(false));
+    if (m_nxtConnection)
+        vbox->addLayout(CreateSensorControls());
+
+    m_topWidget = new QWidget;
+    m_topWidget->setLayout(vbox);
+    setCentralWidget(m_topWidget);
 }
 
+
+QBoxLayout* MainWindow::CreateSensorControls()
+{
+    QGroupBox* sensorsGroup = new QGroupBox(tr("Sensors"), this);
+    m_sensorsLayout = new QGridLayout;
+    // Sensors
+    m_sensorLabels.clear();
+    sensorsGroup->setLayout(m_sensorsLayout);
+    // Battery level
+    QGroupBox* batteryGroup = new QGroupBox(tr("Battery"), this);
+    QVBoxLayout* batteryVBox = new QVBoxLayout;
+    m_batteryLevel = new QProgressBar(this);
+    m_batteryLevel->setFormat("%v mV");
+    m_batteryLevel->setAlignment(Qt::AlignHCenter);
+    m_batteryLevel->setRange(500, 10000); // mV
+    batteryVBox->addWidget(m_batteryLevel);
+    batteryVBox->addStretch(1);
+    batteryGroup->setLayout(batteryVBox);
+    
+    QHBoxLayout* hBox = new QHBoxLayout;
+    hBox->addWidget(sensorsGroup);
+    hBox->addWidget(batteryGroup);
+
+    return hBox;
+}
 
 QWidget* MainWindow::CreateStandardControls(bool wiimote)
 {
@@ -377,6 +655,7 @@ QWidget* MainWindow::CreateStandardControls(bool wiimote)
     m_actionSlider = new QSlider(Qt::Horizontal, this);
     m_actionSlider->setMinimum(0);
     m_actionSlider->setMaximum(100);
+    m_actionSlider->setValue(50);
     connect(m_actionSlider, SIGNAL(valueChanged(int)), this, SLOT(ActionSliderMoved(int)));
     aHBox->addWidget(m_actionSlider);
     QLabel* rightLabel = new QLabel(this);
@@ -413,10 +692,6 @@ void MainWindow::WiiThread::run()
     m_wiimoteInfo.led.bits = 1;
     m_wiimoteInfo.rumble = 0;
 
-    QTime lastNxtUpdate;
-    lastNxtUpdate.start();
-
-    int motorsOld[3] = { 0, 0, 0 };
     int motorAction = 0;
     
     while (wiimote_is_open(&m_wiimoteInfo))
@@ -466,7 +741,12 @@ void MainWindow::WiiThread::run()
                     ++sliderValue;
             }
             slider->setValue(sliderValue);
-            qDebug() << "NK" << m_wiimoteInfo.ext.nunchuk.keys.z << m_wiimoteInfo.ext.nunchuk.keys.c;
+
+            // TODO:
+            // Action mode:
+            // - continous
+            // - timer controlled
+            // - angle controlled
             if (m_wiimoteInfo.ext.nunchuk.keys.z)
             {
                 motorAction = -sliderValue;
@@ -494,6 +774,7 @@ void MainWindow::WiiThread::run()
         }
         else
         {
+            // TODO: Very sensitive to imbalance in x/y (M1 = 100, M2 = 70)
             motor1 = max(-100, min(100, y + x));
             motor2 = max(-100, min(100, y - x));
         }
@@ -505,32 +786,7 @@ void MainWindow::WiiThread::run()
         motors[ps.motor1 - nxt::OUT_A] = motor1;
         motors[ps.motor2 - nxt::OUT_A] = motor2;
         motors[ps.actionMotor - nxt::OUT_A] = motorAction;
-
-        //qDebug() << "M:" << motors[0] << motors[1] << motors[2];
-
-        boost::shared_ptr<nxt::Bluetooth> nxtConnection = m_parent->GetNxtConnection();
-        if (nxtConnection && (lastNxtUpdate.elapsed() >= 100))
-        {
-            for (int i = 0; i < 3; ++i)
-            {
-                if (motors[i] == motorsOld[i])
-                    continue;
-                qDebug() << "Update motor" << ('A'+i);
-                motorsOld[i] = motors[i];
-                nxt::Motor m(static_cast<nxt::Motor_port>(nxt::OUT_A+i),
-                             nxtConnection.get());
-                try
-                {
-                    m.on(motors[i], 0, false);
-                    motorsOld[i] = motors[i];
-                }
-                catch (const nxt::Nxt_exception& e)
-                {
-                    qDebug() << "Motor" << i << "exception: P" << motors[i] << e.what() << e.who().c_str();
-                }
-            }
-        }
-
+        m_parent->SetMotors(motors, QString("X %1 Y %2").arg(x).arg(y));
         /*
         qDebug() << "MODE" << m_wiimoteInfo.mode.bits;
 

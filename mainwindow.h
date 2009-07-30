@@ -20,16 +20,20 @@
 #define mainwindow_h
 
 #include <boost/shared_ptr.hpp>
+#include <boost/ptr_container/ptr_vector.hpp>
 
 #include <QMainWindow>
 #include <QMutex>
 #include <QThread>
+#include <QTime>
 
 // libwiimote
 extern "C"
 {
 #include <libcwiimote/wiimote.h>
 }
+
+#include <sensor.h>
 
 // Forward declarations
 namespace nxt
@@ -40,7 +44,10 @@ namespace nxt
 QT_BEGIN_NAMESPACE
 class QAction;
 class QActionGroup;
+class QBoxLayout;
 class QComboBox;
+class QGridLayout;
+class QProgressBar;
 class QLabel;
 class QMenu;
 class QSlider;
@@ -61,10 +68,10 @@ public:
     
     PortSetup GetSetup() const;
 
-    boost::shared_ptr<nxt::Bluetooth> GetNxtConnection();
-
     QSlider* GetActionSlider() { return m_actionSlider; }
 
+    void SetMotors(int motors[3], QString info);
+                                 
 public slots:
     void Quit();
 
@@ -80,7 +87,16 @@ private slots:
     void TiltClicked();
     void ActionSliderMoved(int);
     void About();
-    
+    void UpdateNxt();
+    void ButtonNWClicked();    
+    void ButtonNClicked();    
+    void ButtonNEClicked();    
+    void ButtonWClicked();    
+    void ButtonEClicked();    
+    void ButtonSWClicked();    
+    void ButtonSClicked();    
+    void ButtonSEClicked();    
+
 private:
     class WiiThread : public QThread
     {
@@ -111,7 +127,8 @@ private:
     void ShowWiimoteControls();
     void ShowMouseControls();
     QWidget* CreateStandardControls(bool wiimote);
-
+    QBoxLayout* CreateSensorControls();
+    
     QMenu* m_deviceMenu;
     QMenu* m_setupMenu;
     QMenu* m_helpMenu;
@@ -124,14 +141,23 @@ private:
     WiiThread m_wiiThread;
     bool m_connectedToWii;
     boost::shared_ptr<nxt::Bluetooth> m_nxtConnection;
-    QMutex m_nxtConnectionMutex;
+
+    int m_motors[3];
+    int m_motorsOld[3];
+    QString m_motorInfo;
+    QMutex m_motorsMutex;
     QWidget* m_topWidget;
     QSlider* m_actionSlider;
     QLabel* m_actionValueLabel;
+    QProgressBar* m_batteryLevel;
+    QList<QLabel*> m_sensorLabels;
+    QGridLayout* m_sensorsLayout;
     PortSetup* m_portSetup;
+    boost::ptr_vector<nxt::Sensor> m_sensors;
     mutable QMutex m_portSetupMutex;
     QString m_wiimoteAddress;
     QString m_nxtAddress;
+    QTime m_lastBatteryUpdate;
 };
 
 #endif

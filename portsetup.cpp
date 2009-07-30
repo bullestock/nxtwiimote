@@ -40,50 +40,6 @@ PortSetup::PortSetup()
 }
 
 
-QString GetAsString(nxt::Sensor_type type)
-{
-    switch (type)
-    {
-    case nxt::NO_SENSOR:
-        return "No sensor";
-
-    case nxt::TOUCH:
-        return "Touch sensor (NXT or RCX)";
-
-    case nxt::TEMPERATURE:
-        return "RCX temperature sensor";
-
-    case nxt::REFLECTION:
-        return "RCX light sensor";
-
-    case nxt::ANGLE:
-        return "RCX rotation sensor";
-
-    case nxt::LIGHT_ACTIVE:
-        return "NXT light sensor, LED on";
-
-    case nxt::LIGHT_INACTIVE:
-        return "NXT light sensor, LED off";
-
-    case nxt::SOUND_DB:
-        return "NXT sound sensor, dB";
-
-    case nxt::SOUND_DBA:
-        return "NXT sound sensor, dBA";
-
-    case nxt::SONAR_METRIC:
-        return "Sonar sensor, metric";
-
-    case nxt::SONAR_INCH:
-        return "Sonar sensor, inches";
-
-    default:
-        break;
-    }
-    return "?";
-}
-
-
 void PortSetup::Load(QSettings& s)
 {
     if (!s.contains("sensor0"))
